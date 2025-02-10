@@ -24,6 +24,7 @@ import numpy as np
 from torch import nn
 from utils import compute_noise_multiplier, cal_sensitivity, calculate_noise_scale
 from tools.privacy_tools import get_sigma
+import time
 
 class BaseClientTrainer(ClientTrainer, ABC):
     def __init__(self, models, public_train_dataloader, train_dataset, valid_dataset, test_dataloader,client_data_sizes):
@@ -56,10 +57,16 @@ class BaseClientTrainer(ClientTrainer, ABC):
 
         self._build_metric()
         self._build_eval()
+
+        # key: client idx, value: valid metric
         self.loc_best_metric = {}
+        # key: client idx, value: test metric
         self.loc_test_metric = {}
+        # key: client idx, value: serialized params
         self.loc_best_params = {}
+        # local patient times
         self.loc_patient_times = 0
+        # local early stop
         self.stop_early = False
         self.train_num_list = []
         self.metric_name = self.metric.metric_name
@@ -84,9 +91,17 @@ class BaseClientTrainer(ClientTrainer, ABC):
                 raise ValueError("Not implemented DP mode")
 
     @property
-    def uplink_package(self): 
+    def uplink_package(self):  
         return self.logits_package
 
+    @property
+    def uplink_parameter(self): 
+        assert len(self.train_num_list) == len(self.param_list)
+        train_num =  torch.Tensor(self.train_num_list)
+        package_send = self.param_list
+        package_send.append(train_num)
+        return package_send
+    
     def get_model_weights(self, model):
         model_weights = {}
         for name, param in model.named_parameters():
@@ -96,6 +111,9 @@ class BaseClientTrainer(ClientTrainer, ABC):
     def _train_alone(self, idx: int):
         """local training for Client"""  
         cluster_train_loader = self._get_dataloader(dataset=self.train_dataset, client_id=idx)
+
+        # data_idx = random.randint(0, 9)
+        # train_loader = train_loader[data_idx]
 
         tmp_idx = idx
         if tmp_idx >= self.federated_config.clients_num_per_sub_server:
@@ -130,7 +148,7 @@ class BaseClientTrainer(ClientTrainer, ABC):
         with torch.no_grad():
             for step, batch in enumerate(dataloader):
                 batch = tuple(t.to(self.device) for t in batch)
-                labels = batch[3] 
+                labels = batch[3]  
 
                 Alogits_step = Alogits[step].to(self.device)
                 zero_tensor = torch.zeros(Alogits[0][0].shape, dtype=torch.float32)
@@ -139,7 +157,7 @@ class BaseClientTrainer(ClientTrainer, ABC):
 
                 data_size += labels.numel()
                 if valid_mask.sum() == 0:
-                    continue 
+                    continue  
 
                 filtered_labels = labels[valid_mask]
                 filtered_Alogits_step = Alogits_step[valid_mask]
@@ -157,7 +175,7 @@ class BaseClientTrainer(ClientTrainer, ABC):
         assert len(Alogits) > 0
         epoch_train = 1
         acc, ratio = self.evaluate_accuracy(Alogits, self.public_train_dataloader)
-
+        
         self.logger.info(f"Alogits acc: {acc:.3f}, Selected ratio: {ratio:.3f}")
 
         self.logger.info("Edge " + str(self.rank) + " is Training with Knowledge")
@@ -178,6 +196,7 @@ class BaseClientTrainer(ClientTrainer, ABC):
             zero_tensor = torch.zeros(Alogits[0][0].shape, dtype=torch.float32)
 
             valid_mask = ~torch.all(Alogits_step == zero_tensor.to(self.device), dim=1)
+
             if valid_mask.sum() == 0:
                 continue  
 
@@ -200,7 +219,6 @@ class BaseClientTrainer(ClientTrainer, ABC):
             optimizer.step()
             scheduler.step()
 
-           
     def param_copy(self): 
         edge_param = SerializationTool.serialize_model(self.models[0])
         for i in range(1,self.client_num):
@@ -219,9 +237,6 @@ class BaseClientTrainer(ClientTrainer, ABC):
             if self.training_config.train_method == 'knowledge':
                 self.train_with_knowledge(self.models[0], payload)
                 self.edge_test(self.rank,'after')
-            elif self.training_config.train_method == 'petuning':
-                SerializationTool.deserialize_model(self.models[0], payload[0])
-                self.edge_test(self.rank,'update')
             else:
                 raise ValueError(f'Invalid training method in local process')
             self.param_copy()
@@ -229,6 +244,7 @@ class BaseClientTrainer(ClientTrainer, ABC):
         for mini_round in range(int(self.training_config.mini_rounds)):
             self.param_list, self.train_num_list = self.fed_train(id_list)            
             serialized_parameters = Aggregators.fedavg_aggregate(self.param_list)
+            #serialized_parameters = Aggregators.fedavg_aggregate(self.param_list,self.train_num_list)
             SerializationTool.deserialize_model(self.models[0], serialized_parameters)
             self.param_copy()
         self.edge_test(self.rank,'before')
@@ -239,6 +255,7 @@ class BaseClientTrainer(ClientTrainer, ABC):
         self.logger.info(f'id_list:{id_list}')
         for idx in id_list:
             self._train_alone(idx=idx)
+            # train_num_list.append(self.get_traindataloader_len(self.train_dataset[idx]))
             train_num_list.append(len(self.train_dataset[idx]))
             if idx >= self.federated_config.clients_num_per_sub_server:
                 idx = idx % self.federated_config.clients_num_per_sub_server
@@ -246,6 +263,10 @@ class BaseClientTrainer(ClientTrainer, ABC):
         return param_list, train_num_list
     
     def get_traindataloader_len(self,train_dataset):
+        # length = 0
+        # for batch in train_dataset:
+        #     length += len(batch)
+        # return length
         length = 0
         for _, value in train_dataset.items():
             length += len(value)
@@ -344,8 +365,6 @@ class BaseClientTrainer(ClientTrainer, ABC):
         norm = torch.norm(params, p=2)
         return  params / max(torch.tensor(1).to(self.device), norm.item()/max_norm)
     
-    
-    # regularization
     def custom_loss(self,loss_fi, model, lambda_reg):
         w_t = self.net_global_params
         proximal_term = 0.0
@@ -376,7 +395,6 @@ class BaseClientTrainer(ClientTrainer, ABC):
             batch = tuple(t.to(self.device) for t in batch)
             inputs = {"input_ids": batch[0], "attention_mask": batch[1], "labels": batch[3]}
             label = inputs["labels"]
-            #print(inputs)
             count_label_0 += (label == 0).sum().item()
             count_label_1 += (label == 1).sum().item()
             if self.model_config.model_type != "distilbert" or self.model_config.model_type != "roberta":
@@ -385,9 +403,8 @@ class BaseClientTrainer(ClientTrainer, ABC):
     
             outputs = model(inputs)
 
-            loss, logits = outputs[:2] 
+            loss, logits = outputs[:2]  
             _, predicted = torch.max(logits, 1)
-
 
             if self.dp_config.dp_method == 'AdaDP':
                 optimizer.zero_grad()
@@ -463,7 +480,7 @@ class BaseClientTrainer(ClientTrainer, ABC):
                     if k in self.not_update:
                         continue
                     self.s[k] = torch.abs(self.w_local_previous[k] - self.net_global_params[k] - self.G[k])
-
+                             
             elif self.dp_config.dp_method == 'NoDP':
                 optimizer.zero_grad()
                 if self.training_config.reg:
@@ -473,17 +490,18 @@ class BaseClientTrainer(ClientTrainer, ABC):
                 self.global_step += 1
                 
                 optimizer.step()
-                scheduler.step()  
+                scheduler.step()  # Update learning rate schedule
+
             else:
                 raise ValueError('DP method error!')   
         
+        return
 
     def diff_values(self,dict1, dict2):
         diff_dict = {}
         for key in dict1:
             diff_dict[key] = dict1[key] - dict2[key]
         return diff_dict
-
     def update_E_g(self, gamma, g_k):
         E_g_prev = self.E_g
         E_g_k = {}
@@ -492,7 +510,7 @@ class BaseClientTrainer(ClientTrainer, ABC):
                 E_g_k[key] = 0
                 continue
             if key in E_g_prev:
-                E_g_k[key] = gamma * E_g_prev[key] + (1 - gamma) * g_tensor  
+                E_g_k[key] = gamma * E_g_prev[key] + (1 - gamma) * g_tensor 
             else:
                 E_g_k[key] =  g_tensor
         self.E_g = E_g_k   
@@ -528,12 +546,14 @@ class BaseClientTrainer(ClientTrainer, ABC):
                 w_local[idx_key] = self.net_global_params[idx_key]
                 continue
             m = torch.prod(torch.tensor(self.net_global_params[idx_key].size()))   
-            # self.sigma[idx_key] = (m**0.5) * self.s[idx_key] * sigma_0/(self.training_config.per_device_train_batch_size)
-            self.sigma[idx_key] = (m**0.5) * self.s[idx_key] * sigma_0 / 32
+            self.sigma[idx_key] = (m**0.5) * self.s[idx_key] * sigma_0/(self.training_config.per_device_train_batch_size)
             self.delta_w_sum[idx_key] = torch.min(torch.max(self.delta_w_sum[idx_key], -self.s[idx_key]), self.s[idx_key])
             noise = torch.normal(mean = 0.0, std = self.sigma[idx_key])
+           
             self.delta_w_sum[idx_key] = self.delta_w_sum[idx_key] + noise.to(self.device)
+
             w_local[idx_key] = self.net_global_params[idx_key] - self.delta_w_sum[idx_key]
+
         model = self.set_model_weights(w_local, model)
 
     def set_model_weights(self,model_weights, model):
@@ -541,7 +561,6 @@ class BaseClientTrainer(ClientTrainer, ABC):
             if name in model_weights:
                 param.data.copy_(model_weights[name].data)
         return model   
-
     def _on_epoch_end(self, model, idx):
         """on epoch end"""
         valid_data = self.valid_dataset
@@ -619,3 +638,6 @@ class BaseClientManager(PassiveClientManager, ABC):
         elif message_code == MessageCode.Knowledge:
             self.logger.info("edge" + str(self.rank) + " uploads knowledge.")
             self._network.send(content=self._trainer.uplink_package, message_code=MessageCode.Knowledge, dst=0)
+        elif message_code == MessageCode.ParameterUpdate:
+            self.logger.info("edge " + str(self.rank) + "uploads parameters.")
+            self._network.send(content=self._trainer.uplink_parameter, message_code=MessageCode.ParameterUpdate, dst=0)
