@@ -1,0 +1,40 @@
+data_config:
+  dataset_name: glue
+
+
+federated_config:
+  alpha: 5
+  clients_num: 9
+  rounds: 30
+  sample: 0.5
+  test_rounds: False
+  log_test_len: 10
+
+
+model_config:
+  model_type: roberta
+  model_output_mode: seq_classification
+  model_name_or_path: "./pretrain/nlp/roberta-base/"
+  permutation_layers: False
+  tuning_type: lora_roberta-base
+  finetune_list: [0,64,32,1]
+  #finetune_list: [0,1,1,1]
+  #finetune_list: [0,8,8,8]
+  
+training_config:
+  train_method: knowledge 
+  reg: True
+  mini_rounds: 1                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               
+  metric_name: glue
+  seed: 42
+
+dp_config:
+  dp_method: AdaDP
+  epsilon: 8
+  delta: 1e-5
+  mode: rdp # mode: prv, moments, rdp
+  max_clip: 0.2 
+  lam: 3.2
+  gamma: 0.1
+
+
