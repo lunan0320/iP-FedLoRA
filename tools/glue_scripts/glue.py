@@ -161,9 +161,9 @@ if __name__ == "__main__":
     #     "MNLI":0.2,
     #     "RTE":0.2
     # }
-    tasks = ["MRPC"]
+    tasks = ["SST-2"]
     task_split_ratio = {
-        "MRPC":0.2,
+        "SST-2":0.2,
     }
  
     client_nums = [9]

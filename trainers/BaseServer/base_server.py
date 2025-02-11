@@ -21,7 +21,7 @@ from fedlab.core.coordinator import Coordinator
 from transformers import get_linear_schedule_with_warmup, AdamW
 import time
 
-class BaseSyncServerHandler(ParameterServerBackendHandler, ABC):  # 基础的同步服务器处理器
+class BaseSyncServerHandler(ParameterServerBackendHandler, ABC):  
     def __init__(self):
         self.begin_time = time.time()
         config = registry.get("config")
@@ -52,30 +52,25 @@ class BaseSyncServerHandler(ParameterServerBackendHandler, ABC):  # 基础的同
         self.ready_number = 0
         self.cluster_num = 3
 
-    def stop_condition(self) -> bool:  # 停止条件，判断是否达到全局轮次上限。
+    def stop_condition(self) -> bool: 
         return self.round >= self.global_round
 
-    def sample_clients(self):  # 采样客户端，根据采样比例从所有客户端中随机选择一定数量的客户端。
+    def sample_clients(self): 
         selection = random.sample(range(self.client_num_in_total), self.client_num_per_round)
         return selection
 
 
     def truncate_last_element(self,logits_list):
-        # 裁剪掉每个logits列表中的最后一个元素
         truncated_logits_list = [logits[:-1] for logits in logits_list]
         return truncated_logits_list
 
     def calculate_pearson_correlation(self,logits_list):
-        # 裁剪最后一个元素
         truncated_logits_list = self.truncate_last_element(logits_list)
         
-        # 计算每个客户端的logits均值（裁剪后）
         mean_logits_list = [torch.mean(torch.stack(logits), dim=0) for logits in truncated_logits_list]
         
-        # 计算参考logits的均值（裁剪后）
         reference_logits = torch.mean(torch.stack(mean_logits_list), dim=0)
         
-        # 计算皮尔逊相关系数
         def pearson_correlation(logits, reference_logits):
             logits_mean = torch.mean(logits, dim=0)
             reference_mean = torch.mean(reference_logits)
@@ -88,15 +83,11 @@ class BaseSyncServerHandler(ParameterServerBackendHandler, ABC):  # 基础的同
             else:
                 return numerator / denominator
         
-        # 计算每个客户端的皮尔逊相关系数（裁剪后）
         correlations = [pearson_correlation(torch.stack(logits), reference_logits) for logits in truncated_logits_list]
         
-        # 将相关系数从 [-1, 1] 映射到 [0, 2] 并归一化
         shifted_correlations = [(correlation + 1) for correlation in correlations]
-        # 使用Softmax函数确保权重非负且归一化
         weights = F.softmax(torch.tensor(shifted_correlations), dim=0).tolist()
         
-        # 加权聚合（使用原始logits）
         weighted_logits = []
         for i in range(len(logits_list[0])):
             weighted_sum = sum(weight * logits[i] for weight, logits in zip(weights, logits_list) if i < len(logits))
