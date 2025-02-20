@@ -50,11 +50,11 @@ class GlueEval(BaseEval, ABC):
             nb_eval_steps += 1
 
             if preds is None:
-                preds = logits.detach().cpu().numpy()
-                out_label_ids = inputs['labels'].detach().cpu().numpy()
+                preds = logits.detach().cpu().to(torch.float32).numpy()
+                out_label_ids = inputs['labels'].detach().cpu().to(torch.float32).numpy()
             else:
-                preds = np.append(preds, logits.detach().cpu().numpy(), axis=0)
-                out_label_ids = np.append(out_label_ids, inputs['labels'].detach().cpu().numpy(), axis=0)
+                preds = np.append(preds, logits.detach().cpu().to(torch.float32).numpy(), axis=0)
+                out_label_ids = np.append(out_label_ids, inputs['labels'].detach().cpu().to(torch.float32).numpy(), axis=0)
 
         eval_loss = eval_loss / nb_eval_steps
         results["eval_loss"] = eval_loss

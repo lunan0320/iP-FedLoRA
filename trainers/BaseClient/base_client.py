@@ -2,44 +2,33 @@
 
 from abc import ABC
 from typing import List
-from thop import profile
-from thop import clever_format
 import torch
 from transformers import get_linear_schedule_with_warmup
 from torch.optim import AdamW
-from torch.optim import lr_scheduler
-import random
-from bigmodelvis import Visualization
 from utils import registry
-from utils import get_parameter_number
-from fedlab.utils import MessageCode, SerializationTool
+from fedlab.utils import MessageCode
 from fedlab.core.client.trainer import ClientTrainer
 from fedlab.core.client.manager import PassiveClientManager
-from fedlab.core.client.manager import ORDINARY_TRAINER, SERIAL_TRAINER
-from fedlab.core.server.handler import Aggregators
-from fedlab.utils.serialization import SerializationTool
+from fedlab.core.client.manager import SERIAL_TRAINER
 import torch.nn.functional as F
-from transformers.optimization import Adafactor, AdafactorSchedule
 import numpy as np
 from torch import nn
-from utils import compute_noise_multiplier, cal_sensitivity, calculate_noise_scale
-from tools.privacy_tools import get_sigma
-import time
+from utils import compute_noise_multiplier
+
 
 class BaseClientTrainer(ClientTrainer, ABC):
-    def __init__(self, models, public_train_dataloader, train_dataset, valid_dataset, test_dataloader,client_data_sizes):
-
-        self.models = models
+    def __init__(self, model, public_train_dataloader, train_dataset, valid_dataset, test_dataloader,client_data_sizes):
+        self._model = model
         self.public_train_dataloader = public_train_dataloader
         self.train_dataset = train_dataset
         self.valid_dataset = valid_dataset
         self.test_dataloader = test_dataloader
         self.client_data_sizes = client_data_sizes
+        #print(f'train datalen:{self.client_data_sizes}')
         self._before_training()
 
     def _before_training(self):
         """before training function"""
-
         self.type = SERIAL_TRAINER  
 
         config = registry.get("config")
@@ -78,14 +67,7 @@ class BaseClientTrainer(ClientTrainer, ABC):
         if self.dp_config.dp_method != 'NoDP':
             if self.dp_config.mode == 'rdp':
                 self.sigma_0 = compute_noise_multiplier(self.dp_config.epsilon, self.dp_config.delta, self.federated_config.rounds, self.training_config.num_train_epochs,\
-                                                    self.training_config.per_device_train_batch_size, self.client_data_sizes)
-                self.logger.info(f'sigma:{self.sigma_0}')
-            elif self.dp_config.mode == 'prv' or self.dp_config.mode == 'moments':
-                # prv or moments
-                total_dataset_size = sum(self.client_data_sizes)
-                q = self.training_config.per_device_train_batch_size / (total_dataset_size)
-                steps = (sum([self.federated_config.rounds * self.training_config.num_train_epochs  * (client_data_size // self.training_config.per_device_train_batch_size) for client_data_size in self.client_data_sizes]))
-                self.sigma_0, eps = get_sigma(q, steps, self.dp_config.epsilon, self.dp_config.delta, mode=self.dp_config.mode)
+                                                    self.training_config.per_device_train_batch_size, self.client_data_sizes)/ np.sqrt(self.federated_config.clients_num)
                 self.logger.info(f'sigma:{self.sigma_0}')
             else:
                 raise ValueError("Not implemented DP mode")
@@ -110,20 +92,17 @@ class BaseClientTrainer(ClientTrainer, ABC):
     
     def _train_alone(self, idx: int):
         """local training for Client"""  
-        cluster_train_loader = self._get_dataloader(dataset=self.train_dataset, client_id=idx)
-
-        # data_idx = random.randint(0, 9)
-        # train_loader = train_loader[data_idx]
+        train_loader = self._get_dataloader(dataset=self.train_dataset, client_id=idx)
 
         tmp_idx = idx
         if tmp_idx >= self.federated_config.clients_num_per_sub_server:
             tmp_idx = tmp_idx % self.federated_config.clients_num_per_sub_server
 
-        model = self.models[tmp_idx]
+        model = self._model
         model.to(self.device)
 
-        self.dp_t = 0
-        self.net_global_params = self.get_model_weights(model)
+        
+        self.net_global_params = {k: v.to(self.device) for k, v in self.get_lora_parameters(model).items()}
         self.net_global = model
         self.not_update = []
         self.g_previous = dict()
@@ -132,13 +111,17 @@ class BaseClientTrainer(ClientTrainer, ABC):
             self.g_previous[name] = 0
             self.sum_G[name] = 0
 
-        train_loader = cluster_train_loader
         optimizer, scheduler = self._build_optimizer(model,len(train_loader))
+        #self._model, optimizer = self._mixed_train_model(self._model, optimizer)
         for epoch in range(0, int(self.training_config.num_train_epochs)):
             self._on_epoch_begin()
             self._on_epoch(model, train_loader, optimizer, scheduler,epoch)
+
         if self.dp_config.dp_method == 'AdaDP':
             self._dp_add(model)
+
+        del self.iter_m, self.iter_v, self.E_g, self.g_used, self.w_local_previous
+        torch.cuda.empty_cache()  
         self._on_epoch_end(model, idx)
    
     def evaluate_accuracy(self,Alogits, dataloader):
@@ -173,11 +156,12 @@ class BaseClientTrainer(ClientTrainer, ABC):
     
     def train_with_knowledge(self, model, Alogits):
         assert len(Alogits) > 0
-        epoch_train = 1
+        model.to(self.device)
         acc, ratio = self.evaluate_accuracy(Alogits, self.public_train_dataloader)
         
         self.logger.info(f"Alogits acc: {acc:.3f}, Selected ratio: {ratio:.3f}")
-
+        if acc < 0.55:
+            return
         self.logger.info("Edge " + str(self.rank) + " is Training with Knowledge")
         self._build_loss()
         optimizer, scheduler = self._build_optimizer(model, len(self.public_train_dataloader))
@@ -219,11 +203,6 @@ class BaseClientTrainer(ClientTrainer, ABC):
             optimizer.step()
             scheduler.step()
 
-    def param_copy(self): 
-        edge_param = SerializationTool.serialize_model(self.models[0])
-        for i in range(1,self.client_num):
-            SerializationTool.deserialize_model(self.models[i], edge_param)
-
     def _get_dataloader(self, dataset, client_id: int):
         """Get :class:`DataLoader` for ``client_id``."""
         if isinstance(dataset, dict):
@@ -235,48 +214,68 @@ class BaseClientTrainer(ClientTrainer, ABC):
     def local_process(self, id_list: List, payload: List):
         if len(payload) > 0:
             if self.training_config.train_method == 'knowledge':
-                self.train_with_knowledge(self.models[0], payload)
+                self.train_with_knowledge(self._model, payload)
                 self.edge_test(self.rank,'after')
             else:
                 raise ValueError(f'Invalid training method in local process')
-            self.param_copy()
-
+            
         for mini_round in range(int(self.training_config.mini_rounds)):
             self.param_list, self.train_num_list = self.fed_train(id_list)            
-            serialized_parameters = Aggregators.fedavg_aggregate(self.param_list)
-            #serialized_parameters = Aggregators.fedavg_aggregate(self.param_list,self.train_num_list)
-            SerializationTool.deserialize_model(self.models[0], serialized_parameters)
-            self.param_copy()
+            aggregated_parameters = self.fedavg_aggregate(self.param_list,self.train_num_list)
+
+            self.update_lora_parameters(self._model, aggregated_parameters)
+
         self.edge_test(self.rank,'before')
+
+    def get_lora_parameters(self, model: torch.nn.Module):
+        lora_params = {}
+        for name, param in model.named_parameters():
+            if 'lora' in name and param.requires_grad: 
+                lora_params[name] = param.data.clone().cpu()  
+        return lora_params
 
     def fed_train(self, id_list: List):
         param_list = []
         train_num_list = []
-        self.logger.info(f'id_list:{id_list}')
+        initial_lora_params = self.get_lora_parameters(self._model) 
+        self.logger.info(f'Selected clients:{id_list}')
+
         for idx in id_list:
+            self.update_lora_parameters(self._model, initial_lora_params)
+
             self._train_alone(idx=idx)
-            # train_num_list.append(self.get_traindataloader_len(self.train_dataset[idx]))
             train_num_list.append(len(self.train_dataset[idx]))
             if idx >= self.federated_config.clients_num_per_sub_server:
                 idx = idx % self.federated_config.clients_num_per_sub_server
-            param_list.append(SerializationTool.serialize_model(self.models[idx]))
+            param_list.append(self.get_lora_parameters(self._model))    
         return param_list, train_num_list
     
-    def get_traindataloader_len(self,train_dataset):
-        # length = 0
-        # for batch in train_dataset:
-        #     length += len(batch)
-        # return length
-        length = 0
-        for _, value in train_dataset.items():
-            length += len(value)
-        return length
-    
+    def fedavg_aggregate(self, param_list, train_num_list):
+        aggregated_params = {}
+
+        total_samples = sum(train_num_list)
+        
+        for name in param_list[0].keys():
+            aggregated_params[name] = torch.zeros_like(param_list[0][name])
+
+        for i, params in enumerate(param_list):
+            weight = train_num_list[i] / total_samples
+            for name in params.keys():
+                aggregated_params[name] += weight * params[name]
+        return aggregated_params
+
+    def update_lora_parameters(self, model, aggregated_params):
+        for name, param in model.named_parameters():
+            if name in aggregated_params: 
+                param.data.copy_(aggregated_params[name].to(param.device))  
+
+
+    # caclulate knowledge
     def global_process(self):
         self.logits_package = []
         equal = 0
         total = 0
-        model = self.models[0]
+        model = self._model
         model.to(self.device)
 
         model.eval()
@@ -302,15 +301,28 @@ class BaseClientTrainer(ClientTrainer, ABC):
     def _build_loss(self):
         self.criterion = registry.get_loss_class(self.training_config.loss_name)(config=self.training_config)
 
-    def _build_optimizer(self, model, datasize = None):
-        optimizer_grouped_parameters = self.get_optimized_model_params(model)
-        optimizer = AdamW(optimizer_grouped_parameters, lr=self.training_config.learning_rate, eps=self.training_config.adam_epsilon)
-        if datasize == None:
-            scheduler = lr_scheduler.CosineAnnealingLR(optimizer, T_max=50, eta_min=1e-6) 
+    def _build_optimizer(self, model, train_dl_len):
+        if self.training_config.max_steps > 0:
+            t_total = self.training_config.max_steps
+            self.training_config.num_train_epochs = \
+                self.training_config.max_steps // (train_dl_len // self.training_config.gradient_accumulation_steps) + 1
         else:
-            scheduler = lr_scheduler.CosineAnnealingLR(optimizer, T_max=datasize, eta_min=1e-6) 
-        return optimizer, scheduler
+            t_total = \
+                train_dl_len // self.training_config.gradient_accumulation_steps * self.training_config.num_train_epochs
 
+        optimizer_grouped_parameters = self.get_optimized_model_params(model)
+
+        optimizer = AdamW(
+            optimizer_grouped_parameters, lr=self.training_config.learning_rate,
+            eps=self.training_config.adam_epsilon
+        )
+        scheduler = get_linear_schedule_with_warmup(
+            optimizer, num_warmup_steps=self.training_config.warmup_steps,
+            num_training_steps=t_total
+        )
+
+        return optimizer, scheduler
+    
     def get_optimized_model_params(self, model): 
         # Prepare optimizer and schedule (linear warmup and decay)
         no_decay = ["bias", "LayerNorm.weight"]
@@ -344,7 +356,7 @@ class BaseClientTrainer(ClientTrainer, ABC):
     
     def edge_test(self,rank,flag='before'):
         result = self.eval.test_and_eval(
-            model=self.models[0],
+            model=self._model,
             valid_dl=self.test_dataloader,
             model_type=self.model_config.model_type,
             model_output_mode=self.model_config.model_output_mode
@@ -361,15 +373,13 @@ class BaseClientTrainer(ClientTrainer, ABC):
             self.logger.critical(f"Edge {rank} Update finished: "
                             f"Current Test {self.metric_name}:{test_metric:.3f}")
 
-    def dp_clip(self,params, max_norm):
-        norm = torch.norm(params, p=2)
-        return  params / max(torch.tensor(1).to(self.device), norm.item()/max_norm)
     
     def custom_loss(self,loss_fi, model, lambda_reg):
         w_t = self.net_global_params
         proximal_term = 0.0
         for name, param in model.named_parameters():
-            proximal_term += torch.max(torch.tensor(0.0, device=param.device), (param - w_t[name].to(self.device) )**2 - self.dp_config.max_clip**2).sum()  
+            if name in w_t.keys():
+                proximal_term += torch.max(torch.tensor(0.0, device=param.device), (param - w_t[name].to(self.device) )**2 - self.dp_config.max_clip**2).sum()  
         return loss_fi + (1/self.rank)*(lambda_reg / 2) * proximal_term   
         
     # Local Test Function
@@ -382,25 +392,18 @@ class BaseClientTrainer(ClientTrainer, ABC):
     def _on_epoch_begin(self):
         self.global_step = 0
         self.total, self.correct = 0, 0
+        self.dp_t = 0
 
     def _on_epoch(self, model, train_loader, optimizer, scheduler,round):
         model.train()
-        count_label_0 = 0
-        count_label_1 = 0 
-
-        self.keys = list(self.net_global_params.keys())
-
         # # iter one epoch
         for step, batch in enumerate(train_loader):
             batch = tuple(t.to(self.device) for t in batch)
             inputs = {"input_ids": batch[0], "attention_mask": batch[1], "labels": batch[3]}
-            label = inputs["labels"]
-            count_label_0 += (label == 0).sum().item()
-            count_label_1 += (label == 1).sum().item()
+
             if self.model_config.model_type != "distilbert" or self.model_config.model_type != "roberta":
                 # XLM, DistilBERT and RoBERTa don't use segment_ids
                 inputs["token_type_ids"] = batch[2] if self.model_config.model_type in ["bert", "xlnet"] else None
-    
             outputs = model(inputs)
 
             loss, logits = outputs[:2]  
@@ -408,21 +411,22 @@ class BaseClientTrainer(ClientTrainer, ABC):
 
             if self.dp_config.dp_method == 'AdaDP':
                 optimizer.zero_grad()
-                self.w_local = self.get_model_weights(model) 
+                self.w_local = {k: v.to(self.device) for k, v in self.get_lora_parameters(model).items()}
+                self.keys = self.w_local.keys()
+                #print(f'self.w_local:{self.w_local.keys()}')
+                #return
                 self.dp_t += 1
                 if self.dp_t == 1:
                     if self.training_config.reg:
                         loss = self.custom_loss(loss, model, self.dp_config.lam)
                     loss.backward()
-                    self.model_previous = model
                     g = dict()
                     self.s = dict()
+
                     for name, parms in model.named_parameters():
-                        if parms.grad is None:
-                            self.not_update.append(name)
-                            g[name] = 0
-                        else:
+                        if name in self.w_local and parms.grad is not None:
                             g[name] = parms.grad.to(self.device)
+                            
                     self.iter_m = dict()
                     self.iter_v = dict()
                     self.E_g = dict()
@@ -442,45 +446,38 @@ class BaseClientTrainer(ClientTrainer, ABC):
 
                     loss.backward()
 
-                    self.model_previous = model
                     g = dict()
                     for name, parms in model.named_parameters():
-                        if parms.grad is None:
-                            g[name] = 0
-                        else:
+                        if name in self.w_local and parms.grad is not None:
                             g[name] = parms.grad.to(self.device)
 
                     for k, v in g.items():
                         self.iter_m[k] = 0.9*self.iter_m[k]+0.1*g[k]
                         self.iter_v[k] = 0.999*self.iter_v[k]+0.001*g[k]*g[k]
+
                     hat_m = dict()
                     hat_v = dict()
                     self.w_local_previous = self.w_local.copy()
+
                     for k, v in self.iter_m.items():
                         hat_m[k]=self.iter_m[k]/(1-0.9**self.dp_t)
                         hat_v[k]=self.iter_v[k]/(1-0.999**self.dp_t)
                     for k, v in self.w_local.items():
-                        hat_v[k] = torch.tensor(hat_v[k])
                         v = v - dp_lr * hat_m[k]/(torch.sqrt(hat_v[k])+1e-8)
                         self.w_local[k] = v
+
                 scheduler.step()  
                 self.dp_lr = scheduler.get_last_lr()[0]
 
-                model = self.set_model_weights(self.w_local, model)
-          
+                self.update_lora_parameters(model, self.w_local)
+
                 self.iter_m_used = self.iter_m.copy()
                 self.iter_v_used = self.iter_v.copy()  
 
                 self.update_E_g(self.dp_config.gamma, self.g_used)
                 self.adam_G()
                 self.g_used = g.copy()
-                for k in self.keys: 
-                    w_local_shape = self.w_local_previous[k].shape
-                    self.s[k] = torch.zeros(w_local_shape).to(self.device)
-                    if k in self.not_update:
-                        continue
-                    self.s[k] = torch.abs(self.w_local_previous[k] - self.net_global_params[k] - self.G[k])
-                             
+                
             elif self.dp_config.dp_method == 'NoDP':
                 optimizer.zero_grad()
                 if self.training_config.reg:
@@ -490,25 +487,24 @@ class BaseClientTrainer(ClientTrainer, ABC):
                 self.global_step += 1
                 
                 optimizer.step()
-                scheduler.step()  # Update learning rate schedule
-
+                scheduler.step() 
             else:
                 raise ValueError('DP method error!')   
+        del hat_m, hat_v    
         
+        if self.dp_config.dp_method == 'AdaDP':
+            for k in self.keys: 
+                w_local_shape = self.w_local_previous[k].shape
+                self.s[k] = torch.zeros(w_local_shape).to(self.device)
+                self.s[k] = 1.1 * torch.median(torch.abs(self.w_local_previous[k] - self.net_global_params[k] - self.G[k]))
+                #self.s[k] = 1.1 * torch.quantile(torch.abs(self.w_local_previous[k] - self.net_global_params[k] - self.G[k]), 0.9)
+            #print(f's:{self.s.values()}')
         return
 
-    def diff_values(self,dict1, dict2):
-        diff_dict = {}
-        for key in dict1:
-            diff_dict[key] = dict1[key] - dict2[key]
-        return diff_dict
     def update_E_g(self, gamma, g_k):
         E_g_prev = self.E_g
         E_g_k = {}
         for key, g_tensor in g_k.items():
-            if key in self.not_update:
-                E_g_k[key] = 0
-                continue
             if key in E_g_prev:
                 E_g_k[key] = gamma * E_g_prev[key] + (1 - gamma) * g_tensor 
             else:
@@ -523,47 +519,45 @@ class BaseClientTrainer(ClientTrainer, ABC):
         tmp_iter_v = dict()
         beta = 1.2
         for k in self.keys: 
-            if k in self.not_update:
-                self.G[k] = 0
-                self.sum_G[k] += 0
-                continue
             tmp_iter_m[k] = 0.9*self.iter_m_used[k]+0.1*self.E_g[k]
             tmp_iter_v[k] = 0.999*self.iter_v_used[k]+0.001*self.E_g[k]*self.E_g[k]
             hat_m[k]=tmp_iter_m[k]/(1-0.9**self.dp_t)
             hat_v[k]=tmp_iter_v[k]/(1-0.999**self.dp_t)    
-            hat_v[k] = torch.tensor(hat_v[k])
             self.G[k] = beta * self.dp_lr * hat_m[k]/(torch.sqrt(hat_v[k])+1e-8)   
             self.sum_G[k] += self.G[k] 
 
+    def diff_values(self,dict1, dict2):
+        diff_dict = {}
+        for key in dict1:
+            diff_dict[key] = dict1[key] - dict2[key]
+        return diff_dict
+    
     def _dp_add(self,model):
-        w_local = dict()
-        model_K = self.w_local
-        self.delta_w_sum = self.diff_values(self.net_global_params,model_K) 
-        sigma_0 = self.sigma_0
-        difference = 0
-        for idx_key in self.keys: 
-            if idx_key in self.not_update:
-                w_local[idx_key] = self.net_global_params[idx_key]
-                continue
-            m = torch.prod(torch.tensor(self.net_global_params[idx_key].size()))   
-            self.sigma[idx_key] = (m**0.5) * self.s[idx_key] * sigma_0/(self.training_config.per_device_train_batch_size)
-            self.delta_w_sum[idx_key] = torch.min(torch.max(self.delta_w_sum[idx_key], -self.s[idx_key]), self.s[idx_key])
-            noise = torch.normal(mean = 0.0, std = self.sigma[idx_key])
-           
-            self.delta_w_sum[idx_key] = self.delta_w_sum[idx_key] + noise.to(self.device)
+        self.delta_w_sum = self.diff_values(self.w_local, self.net_global_params) 
+        
+        for idx_key in self.keys:   
+            m = len(self.keys)
+            self.sigma[idx_key] = (m**0.5) * self.sigma_0 * 2 * self.s[idx_key] 
 
-            w_local[idx_key] = self.net_global_params[idx_key] - self.delta_w_sum[idx_key]
+            # update clipping
+            self.delta_w_sum[idx_key] = torch.clamp(self.delta_w_sum[idx_key], -self.s[idx_key], self.s[idx_key])
 
-        model = self.set_model_weights(w_local, model)
+            # add noise
+            noise = torch.normal(mean = 0.0, std = self.sigma[idx_key], size = self.w_local[idx_key].size()).to(self.device)
 
-    def set_model_weights(self,model_weights, model):
-        for name, param in model.named_parameters():
-            if name in model_weights:
-                param.data.copy_(model_weights[name].data)
-        return model   
+            #self.logger.info(f'std: {self.sigma[idx_key]}, noise:{noise[0]}, delta:{self.delta_w_sum[idx_key][0]}') 
+            
+            self.delta_w_sum[idx_key] +=  noise
+
+            self.w_local[idx_key] = self.net_global_params[idx_key] + self.delta_w_sum[idx_key]
+
+            #self.logger.info(f'after noise: {self.delta_w_sum[idx_key][0]}') 
+
+        self.update_lora_parameters(model, self.w_local)
+
     def _on_epoch_end(self, model, idx):
         """on epoch end"""
-        valid_data = self.valid_dataset
+        valid_data = self.valid_dataset[idx]
          
         result = self.eval.test_and_eval(
             model=model,
@@ -579,7 +573,6 @@ class BaseClientTrainer(ClientTrainer, ABC):
             self.loc_best_metric[idx] = float('-inf')
         if self.loc_best_metric[idx] < test_metric:
             self.loc_best_metric[idx] = test_metric
-            self.loc_best_params[idx] = SerializationTool.serialize_model(model)
             self.loc_patient_times = 0
         else:
             self.loc_patient_times += 1

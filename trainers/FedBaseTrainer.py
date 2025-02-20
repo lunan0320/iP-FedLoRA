@@ -4,12 +4,6 @@ from abc import ABC
 from utils import registry
 from utils import global_metric_save
 from fedlab.core.network import DistNetwork
-import torch
-
-from transformers import trainer, AutoConfig
-
-from opendelta import AutoDeltaConfig
-from opendelta.auto_delta import AutoDeltaModel
 
 
 class BaseTrainer(ABC):
@@ -20,7 +14,6 @@ class BaseTrainer(ABC):
         self.data_config = config.D
         self.training_config = config.T
         self.federated_config = config.F
-
         self.logger = registry.get("logger")
 
     @property
@@ -53,12 +46,8 @@ class BaseTrainer(ABC):
         self.data = registry.get_data_class(self.data_config.dataset_name)()
 
     def _build_model(self):
-
-        self.models = []
-        for i in range(self.federated_config.clients_num_per_sub_server):
-            model = registry.get_model_class(self.model_config.model_output_mode)(task_name=self.data_config.task_name)
-            self.models.append(model)
-
+        # one backbone on one gpu
+        self.model = registry.get_model_class(self.model_config.model_output_mode)(task_name=self.data_config.task_name)
 
 
     def _before_training(self):
@@ -79,7 +68,6 @@ class BaseTrainer(ABC):
             self._build_server()
         else:
             self.logger.info(f"{self.role} building model ...")
-            
             self._build_model()
             self._build_client()
          

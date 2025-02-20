@@ -1,17 +1,44 @@
 """BaseModel for iP-FedLoRA"""
 
-import copy
 from abc import ABC
 from utils import registry
-from models.utils import PromptType
-from transformers import AutoModelForTokenClassification, AutoModelForSequenceClassification
+from transformers import  AutoModelForSequenceClassification
 import torch
 import torch.nn as nn
-from transformers import trainer, AutoConfig,AutoTokenizer
-from bigmodelvis import Visualization
-from opendelta import AutoDeltaConfig
-from opendelta.auto_delta import AutoDeltaModel
-from opendelta import AdapterModel,LoraModel,BitFitModel,SoftPromptModel
+from transformers import AutoConfig,AutoTokenizer
+
+
+class LoRALinear(nn.Module):
+    def __init__(self, original_linear, r, alpha, dtype):
+        super().__init__()
+        self.original_linear = original_linear
+        self.r = r
+        self.alpha = alpha
+        self.scaling = alpha / r 
+        self.dtype = dtype
+
+        self.lora_A = nn.Parameter(torch.randn(original_linear.out_features, r, dtype=self.dtype) * 0.01)  
+        self.lora_B = nn.Parameter(torch.zeros(r, original_linear.in_features, dtype=self.dtype)) 
+
+    def forward(self, x):
+        self.lora_B = self.lora_B.to(x.device)
+        self.lora_A = self.lora_A.to(x.device)
+        original_output = self.original_linear(x)
+
+        lora_B_x = torch.matmul(self.lora_B, x.transpose(-1, -2))  # (r, batch, seq_len)
+        lora_A_B_x = torch.matmul(self.lora_A, lora_B_x).transpose(-1, -2)  # (batch, seq_len, out_features)
+
+        return original_output + self.scaling * lora_A_B_x
+
+def replace_with_lora(model, target_modules, r, alpha, dtype):
+    for name, module in model.named_children():
+        if isinstance(module, nn.Linear) and any(target in name for target in target_modules):
+            setattr(model, name, LoRALinear(module, r, alpha, dtype)) 
+            #print(f'linear:{isinstance(module, nn.Linear) },name:{name},module:{module}')
+        else:
+            replace_with_lora(module, target_modules, r, alpha, dtype) 
+
+
 
 class BaseModels(nn.Module, ABC):
     def __init__(self, task_name):
@@ -38,85 +65,52 @@ class BaseModels(nn.Module, ABC):
 
     def _build_model(self):
         backbone = self._add_base_model()  
-        Visualization(backbone).structure_graph()
-
-        if getattr(self.model_config, "permutation_layers", None): 
-            backbone = self._add_permutate_layers(backbone)
-
-        if self.model_config.tuning_type:
-             backbone = self._add_delta_model(backbone)
+        backbone = self._add_delta_model(backbone)
         return backbone
 
     def _add_base_model(self):
-        
-        backbone = AutoModelForSequenceClassification.from_pretrained(
-            self.model_config.model_name_or_path,
-            config=self.auto_config,   
-        )
-        vocab_size = backbone.config.vocab_size
-   
+        if self.model_config.model_type == 'llama3':
+            backbone = AutoModelForSequenceClassification.from_pretrained(
+                self.model_config.model_name_or_path,
+                num_labels=2,
+                torch_dtype=torch.bfloat16,  
+            )
+            tokenizer = AutoTokenizer.from_pretrained(
+                self.model_config.model_name_or_path,
+                # cache_dir=self.model_config.cache_dir,
+                use_fast=True,
+                revision=self.model_config.model_revision,
+                use_auth_token=True if self.model_config.use_auth_token else None,
+            )
+            if backbone.config.pad_token_id is None:
+                backbone.config.pad_token_id = tokenizer.eos_token_id
+        else:
+            backbone = AutoModelForSequenceClassification.from_pretrained(
+                self.model_config.model_name_or_path,
+                config=self.auto_config,   
+            )
         return backbone
 
-    def _add_permutate_layers(self, backbone):
-     
-        modules = self.get_module(backbone)
-
-        old_modules = modules.encoder.layer
-        scrambled_modules = torch.nn.ModuleList()
-        
-        if self.rank > 0:
-            permutation = self.model_config.client_model_layers[self.rank]
-        else:
-            permutation = self.model_config.server_model_layers
-            
-        for i in permutation:
-            assert i <= len(old_modules) - 1, permutation 
-            scrambled_modules.append(old_modules[i])
-        
-        backbone_copy = copy.deepcopy(backbone)
-        modules_copy = self.get_module(backbone)
-
-        if self.model_config.model_type == "gpt2":
-            modules_copy.h = scrambled_modules
-        else:
-            modules_copy.encoder.layer = scrambled_modules
-
-        return backbone_copy
-
-
     def _add_delta_model(self, backbone):
-        if self.model_config.model_type=="roberta":
-            if self.model_config.tuning_type == "adapter_roberta-base":
-                delta_model = AdapterModel(backbone_model=backbone, modified_modules=['dense',], bottleneck_dim=self.model_config.finetune_list[self.rank]) 
-            elif self.model_config.tuning_type == "lora_roberta-base":
-                delta_model = LoraModel(backbone_model=backbone, modified_modules=['attention.self.query','attention.self.key','attention.self.value','intermediate.dense'],\
-                                         lora_r=self.model_config.finetune_list[self.rank],lora_alpha=self.model_config.finetune_list[self.rank]) 
-                # delta_model = LoraModel(backbone_model=backbone, modified_modules=['dense'],\
-                #         lora_r=self.model_config.finetune_list[self.rank],lora_alpha=self.model_config.finetune_list[self.rank]) 
-            elif self.model_config.tuning_type == "bitfit_roberta-base":
-                delta_model = BitFitModel(backbone_model=backbone, modified_modules=['dense','layer_norm']) 
-            elif self.model_config.tuning_type == "soft_prompt_roberta-base":
-                delta_model = SoftPromptModel(backbone_model=backbone, modified_modules=['dense'],soft_token_num = self.model_config.finetune_list[self.rank]) 
-            delta_model.freeze_module(exclude=["deltas", "layer_norm","final_layer_norm", "classifier"],set_state_dict=True)  
-        elif self.model_config.model_type=="debertav2":
-            if self.model_config.tuning_type == "lora_roberta-base":
-                delta_model = LoraModel(backbone_model=backbone, modified_modules=['attention.self.query_proj','attention.self.key_proj','attention.self.value_proj','intermediate.dense'],\
-                                        lora_r=self.model_config.finetune_list[self.rank],lora_alpha=self.model_config.finetune_list[self.rank]) 
-            delta_model.freeze_module(exclude=["deltas", "layer_norm","final_layer_norm", "classifier"],set_state_dict=True)  
+        if self.model_config.model_type == 'llama3':
+            dtype = torch.bfloat16
+            target_modules = ['q_proj', 'k_proj', 'v_proj']  
+        else:
+            dtype = torch.float32
+            target_modules = ['query', 'key', 'value']
+        r = self.model_config.finetune_list[self.rank]
+        alpha = 2 * self.model_config.finetune_list[self.rank]
 
-        delta_model.log() 
+        replace_with_lora(backbone, target_modules, r, alpha, dtype)
+
+        for name, param in backbone.named_parameters():
+            if any(t in name for t in ["lora_A", "lora_B", "layer_norm", "final_layer_norm", "classifier"]):
+                param.requires_grad = True 
+            else:
+                param.requires_grad = False
         return backbone
 
     def forward(self, inputs):
         raise NotImplementedError
 
-    def get_module(self, backbone):
 
-        if self.model_config.model_type == "bert":
-            return backbone.bert
-        elif self.model_config.model_type == "roberta":
-            return backbone.roberta
-        elif self.model_config.model_type == 'debertav2':
-            return backbone.deberta
-        else:
-            raise NotImplementedError

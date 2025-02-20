@@ -1,11 +1,9 @@
-import numpy as np
 from abc import ABC
 
 from seqeval.metrics import f1_score
 from seqeval.metrics import precision_score
 from seqeval.metrics import accuracy_score
 from seqeval.metrics import recall_score
-from seqeval.metrics import classification_report
 
 from utils.register import registry
 from tools.glue_scripts.glue_metric import glue_compute_metrics

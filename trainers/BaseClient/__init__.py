@@ -4,5 +4,4 @@ from trainers.BaseClient.base_client import BaseClientTrainer, BaseClientManager
 __all__ = [
     "BaseClientTrainer",
     "BaseClientManager",
-    # "BaseLocalTrainer",
 ]

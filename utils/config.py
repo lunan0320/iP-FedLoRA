@@ -2,10 +2,6 @@
 
 import os
 import time
-import copy
-
-# import json
-# import dataclasses
 from abc import ABC
 from omegaconf import OmegaConf
 from transformers import HfArgumentParser
@@ -13,7 +9,7 @@ from transformers import HfArgumentParser
 from utils import make_sure_dirs, rm_file
 from utils.register import registry
 from configs import ModelArguments, DataTrainingArguments, TrainArguments, FederatedTrainingArguments, DPArguments
-from configs.tuning import get_delta_config, get_delta_key
+from configs.tuning import get_delta_config
 
 grid_hyper_parameters = [
     "tuning_type",
@@ -69,17 +65,12 @@ class Config(ABC):
 
     # Method to check and adjust tuning configuration settings
     def config_check_tuning(self):
-        # If no tuning type or "fine" is in the tuning type, set default delta_config
-        if not self.M.tuning_type or "fine" in self.M.tuning_type:
-            delta_config = {"delta_type": "fine-tuning"}
-            self.M.tuning_type = ""
+        # Get the specific delta configuration for the task
+        delta_args = get_delta_config()
+        if self.D.task_name in delta_args:
+            delta_config = delta_args[self.D.task_name]
         else:
-            # Get the specific delta configuration for the task
-            delta_args = get_delta_config(self.M.tuning_type)
-            if self.D.task_name in delta_args:
-                delta_config = delta_args[self.D.task_name]
-            else:
-                delta_config = delta_args
+            delta_config = delta_args
 
         # If grid search is to be performed, update delta_config with model and training configs
         if self.T.do_grid:
@@ -91,8 +82,6 @@ class Config(ABC):
                     delta_config[key] = getattr(self.T, key)
         logger = registry.get("logger")
         logger.info(f'Tuning config:{delta_config}')
-        # logger.info(f'num_train_epochs:{delta_config['num_train_epochs']},\
-        #             per_device_train_batch_siz:{delta_config['per_device_train_batch_size']} ')
         # Register the delta_config in a registry for global access
         registry.register("delta_config", delta_config)
 
@@ -193,30 +182,15 @@ def amend_config(model_args, data_args, training_args, federated_args,dp_args):
 
     config.check_config()
 
-    if config.T.do_grid:
-        key_name, key_abb = get_delta_key(config.T.tuning_type)
-        delta_config = registry.get("delta_config")
-        if key_name:
-            grid_info = "=".join([key_abb, str(delta_config[key_name])])
-        else:
-            grid_info = ""
-        registry.register("grid_info", grid_info)
 
-        config.T.metric_line = (
-            f"{times}_{config.M.model_type}_{config.T.tuning_type}_"
-            f"seed={config.T.seed}_rounds={config.F.rounds}_"
-            f"cli={config.F.clients_num}_alp={config.F.alpha}_"
-            f"sap={config.F.sample}_epo={config.T.num_train_epochs}_"
-            f"lr={config.T.learning_rate}_{grid_info}_"
-        )
-    else:
-        config.T.metric_line = (
-            f"{times}_{config.M.model_type}_{config.T.tuning_type}_"
-            f"seed={config.T.seed}_rounds={config.F.rounds}_"
-            f"cli={config.F.clients_num}_alp={config.F.alpha}_"
-            f"sap={config.F.sample}_rd={config.F.rounds}_epo={config.T.num_train_epochs}_"
-            f"lr={config.T.learning_rate}_"
-        )
+  
+    config.T.metric_line = (
+        f"{times}_{config.M.model_type}_{config.T.tuning_type}_"
+        f"seed={config.T.seed}_rounds={config.F.rounds}_"
+        f"cli={config.F.clients_num}_alp={config.F.alpha}_"
+        f"sap={config.F.sample}_rd={config.F.rounds}_epo={config.T.num_train_epochs}_"
+        f"lr={config.T.learning_rate}_"
+    )
 
     registry.register("config", config)
 

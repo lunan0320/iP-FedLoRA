@@ -6,8 +6,7 @@ from utils import registry, pickle_read, check_cached_data,  pickle_write, norma
 from utils import setup_seed
 import torch
 from torch.utils.data import DataLoader, RandomSampler, SequentialSampler, TensorDataset, Subset
-from transformers import AutoTokenizer
-from collections import Counter
+from transformers import AutoTokenizer, DataCollatorWithPadding
 class BaseDataLoader(ABC):
     def __init__(self):
 
@@ -65,25 +64,28 @@ class BaseDataLoader(ABC):
             self.logger.info(f"local rank {self.federated_config.rank} builds dataloader")
             train_features_dict, valid_features_dict, train_features_all, valid_features_all, test_features_all, \
             train_examples_num_dict, valid_examples_num_dict = pickle_read(self.cached_data_file)
-         
-            # for idx in self.clients_list:
-            #     train_dataloader_dict[idx] = self.build_dataloader(train_features_dict[idx], "train")
-            
+
+            # train dataset sorted
             sorted_keys = sorted(train_features_dict, key=lambda k: len(train_features_dict[k]), reverse=True)
             sorted_train_features_dict = {i: train_features_dict[k] for (i,k) in zip(range(len(sorted_keys)),sorted_keys)}
-         
+            # valid dataset sorted
+            sorted_keys = sorted(valid_features_dict, key=lambda k: len(valid_features_dict[k]), reverse=True)
+            sorted_valid_features_dict = {i: valid_features_dict[k] for (i,k) in zip(range(len(sorted_keys)),sorted_keys)}
+
             for idx in self.clients_list:
                 train_dataloader_dict[idx] = self.build_dataloader(sorted_train_features_dict[idx], "train")
+                valid_dataloader_dict[idx] = self.build_dataloader(sorted_valid_features_dict[idx], "valid")
+
         else:
             # Local data loading
             self.logger.info("Sorry, the current glue_dataloader doesn't support local loading")
             raise NotImplementedError
-
         
-        self.test_dataloader = self.build_dataloader(test_features_all, "test")
-        self.train_dataloader_dict = train_dataloader_dict
-        self.valid_dataloader = self.build_dataloader(valid_features_all, "valid")
+        self.train_dataloader = train_dataloader_dict
+        self.valid_dataloader = valid_dataloader_dict
+        self.test_dataloader = self.build_dataloader(valid_features_all, "test")
         self.public_train_dataloader = self.build_dataloader(valid_features_all, "public")
+
         self.train_examples_num_dict = train_examples_num_dict
         self.valid_examples_num_dict = valid_examples_num_dict
         
@@ -91,12 +93,6 @@ class BaseDataLoader(ABC):
         raw_data = pickle_read(self.data_config.raw_dataset_path)
         partition_data = pickle_read(self.data_config.partition_dataset_path)
        
-        # for i in range(9):
-        #     train_examples_labels = [raw_data['train'][idx].label for idx in partition_data['clients=9_alpha=100']['train'][i]]
-        #     valid_examples_labels = [raw_data['valid'][idx].label for idx in partition_data['clients=9_alpha=100']['valid'][i]]
-        #     test_examples_labels = [raw_data['test'][idx].label for idx in partition_data['clients=9_alpha=100']['test'][i]]
-        #     print(f'Client {i} "Train: {Counter(train_examples_labels)} Valid: {Counter(valid_examples_labels)} Test: {Counter(test_examples_labels)}')
-        
         train_examples_num_dict, valid_examples_num_dict = {}, {}
         train_features_dict, valid_features_dict = {}, {}
         train_features_all, valid_fedtures_all, test_fedtures_all = None, None, None
@@ -140,60 +136,57 @@ class BaseDataLoader(ABC):
             registry.register("label2id", label2id)
             registry.register("id2label", id2label)
 
+    def custom_collate_fn(self,batch):
+        input_ids = torch.stack([item[0] for item in batch])
+        attention_mask = torch.stack([item[1] for item in batch])
+        token_type_ids = torch.stack([item[2] for item in batch])
+        labels = torch.stack([item[3] for item in batch])
+
+        return (input_ids, attention_mask, token_type_ids,labels)
+    
+    
     def build_dataloader(self, features, mode="train"):
      
         # Convert to Tensors and build dataset
         all_input_ids = torch.tensor([f.input_ids for f in features], dtype=torch.long)
         all_attention_mask = torch.tensor([f.attention_mask for f in features], dtype=torch.long)
-
-        if self.model_config.model_type not in ["distilbert", "roberta","gpt2"]:
-            all_token_type_ids = torch.tensor([f.token_type_ids for f in features], dtype=torch.long)
-        else:
-            # distilbert and roberta don't have token_type_ids
-            all_token_type_ids = torch.tensor([f.attention_mask for f in features], dtype=torch.long)
-
+        
         if self.output_mode == "regression":
             all_labels = torch.tensor([f.label for f in features], dtype=torch.float)
         else:
             all_labels = torch.tensor([f.label for f in features], dtype=torch.long)
 
-        if self.model_config.tuning_type and "prompt" in self.model_config.tuning_type:
-            all_loss_ids = torch.tensor([f.loss_ids for f in features], dtype=torch.float)
-            dataset = TensorDataset(all_input_ids, all_attention_mask, all_token_type_ids, all_labels, all_loss_ids)
+        if self.model_config.model_type not in ["distilbert", "roberta","gpt2"]:
+            if (hasattr(features[0], 'token_type_ids') and features[0].token_type_ids is not None):
+                all_token_type_ids = torch.tensor([f.token_type_ids for f in features], dtype=torch.long)
+            else:
+                all_token_type_ids = torch.zeros_like(all_input_ids, dtype=torch.long)
         else:
-            dataset = TensorDataset(all_input_ids, all_attention_mask, all_token_type_ids, all_labels)
-        sampler = RandomSampler(dataset) if mode == "train" else SequentialSampler(dataset)
-        if mode == "train":
-            #return self.create_subdataloaders(dataset, self.training_config.train_batch_size)
-            return DataLoader(dataset, batch_size=self.training_config.train_batch_size)
-        else:
-            dataloader = DataLoader(dataset, sampler=sampler, batch_size=self.training_config.train_batch_size)
-            return dataloader
-    
-
-    def create_subdataloaders(self, dataset, batch_size):
-        total_size = len(dataset)
-        sub_size = total_size // 5
-
-        sub_dataloaders = {}
-       
-        for i in range(5):
-            indices = list(range(i * sub_size, (i + 1) * sub_size))
-            sub_dataset = Subset(dataset, indices)
+            # distilbert and roberta don't have token_type_ids
+            all_token_type_ids = torch.tensor([f.attention_mask for f in features], dtype=torch.long)
         
-            sub_dataloader = DataLoader(sub_dataset, batch_size=batch_size)
-            sub_dataloaders[i] = sub_dataloader
+        dataset = TensorDataset(all_input_ids, all_attention_mask, all_token_type_ids, all_labels)
 
-        return sub_dataloaders
+        sampler = RandomSampler(dataset) if mode == "train" else SequentialSampler(dataset)
+        if self.model_config.model_type == 'llama3':
+            data_collator = DataCollatorWithPadding(self.tokenizer, padding=True)
+            if mode == "train":
+                return DataLoader(dataset, batch_size=self.training_config.train_batch_size, collate_fn=self.custom_collate_fn)
+            else:
+                dataloader = DataLoader(dataset, sampler=sampler, batch_size=self.training_config.train_batch_size, collate_fn=self.custom_collate_fn)
+                return dataloader         
+        else:
+            if mode == "train":
+                return DataLoader(dataset, batch_size=self.training_config.train_batch_size)
+            else:
+                dataloader = DataLoader(dataset, sampler=sampler, batch_size=self.training_config.train_batch_size)
+                return dataloader
     
 
     def _build_tokenizer(self):
-        
-        print(self.model_config.model_name_or_path)
         if self.model_config.model_type in {"bloom", "roberta"}:
             self.tokenizer = AutoTokenizer.from_pretrained(
                 self.model_config.model_name_or_path,
-                # cache_dir=self.model_config.cache_dir,
                 use_fast=True,
                 revision=self.model_config.model_revision,
                 use_auth_token=True if self.model_config.use_auth_token else None,
@@ -201,7 +194,7 @@ class BaseDataLoader(ABC):
             )
         elif self.model_config.model_type == "debertav3":
             self.tokenizer = AutoTokenizer.from_pretrained(
-                "./pretrain/nlp/debertav3/",
+                self.model_config.model_name_or_path,
                 # cache_dir=self.model_config.cache_dir,
                 use_fast=True,
                 revision=self.model_config.model_revision,
@@ -210,6 +203,7 @@ class BaseDataLoader(ABC):
             )
 
         else:
+            print(f'tokenizer:{self.model_config.model_name_or_path}')
             self.tokenizer = AutoTokenizer.from_pretrained(
                 self.model_config.model_name_or_path,
                 # cache_dir=self.model_config.cache_dir,
@@ -217,6 +211,8 @@ class BaseDataLoader(ABC):
                 revision=self.model_config.model_revision,
                 use_auth_token=True if self.model_config.use_auth_token else None,
             )
+            if self.tokenizer.pad_token is None:
+                self.tokenizer.pad_token = self.tokenizer.eos_token
 
     @property
     def cached_data_file(self):

@@ -15,7 +15,7 @@ class ModelArguments:
         default=None, metadata={"help": "model_name"}
     )
     model_output_mode: Optional[str] = field(
-        default=None,
+        default='seq_classification',
         metadata={"help": "model_output_type: {seq_classification, seq_tagging, language_model}"}
     )
     config_name: Optional[str] = field(
@@ -46,15 +46,7 @@ class ModelArguments:
         metadata={"help": "Will enable to load a pretrained model whose head dimensions are different."},
     )
 
-    # Personalized Model Config
-    permutation_layers: bool = field(
-        default=False,
-        metadata={"help": "The flag controls model layers."},
-    )
-    client_model_layers: List[int] = field(
-        default_factory=list,
-        metadata={"help": "The client model's size, default=[0,1,2]"},
-    )
+    # rank r set list
     finetune_list: List[int] = field(
         default_factory=list,
         metadata={},
@@ -70,16 +62,8 @@ class ModelArguments:
         metadata={"help": "lora specific parameters"}
     )
     lora_alpha: int = field(
-        default=8,
-        metadata={"help": "lora specific parameters"}
-    )
-    prefix_token_num: int = field(
         default=16,
-        metadata={"help": "prefix-tuning specific parameters"}
-    )
-    bottleneck_dim: int = field(
-        default=64,
-        metadata={"help": "adapter specific parameters"}
+        metadata={"help": "lora specific parameters"}
     )
 
     def __post_init__(self):

@@ -22,12 +22,11 @@ class FedAvgTrainer(BaseTrainer):
 
     def _build_client(self):
         self.client_trainer = FedAvgClientTrainer(
-            models=self.models,
+            model=self.model,
             public_train_dataloader=self.data.public_train_dataloader,
-            train_dataset=self.data.train_dataloader_dict,
+            train_dataset=self.data.train_dataloader,
             valid_dataset=self.data.valid_dataloader,
             test_dataloader=self.data.test_dataloader, 
             client_data_sizes = list(self.data.train_examples_num_dict.values())
         )
-
         self.client_manager = FedAvgClientManager(trainer=self.client_trainer, network=self.network)

@@ -1,15 +1,11 @@
-"""Customer Dataloader for FedETuning"""
+"""Customer Dataloader for iP-FedLoRA"""
 
-import os
 import numpy as np
 
 from utils import registry
 from data import BaseDataLoader
 from data.utils import conll_convert_examples_to_features
 
-import torch
-from torch.utils.data import (DataLoader, RandomSampler, SequentialSampler,
-                              TensorDataset)
 from transformers import glue_convert_examples_to_features
 
 
@@ -70,7 +66,7 @@ class GlueDataLoader(BaseDataLoader):
             train_examples_num_dict, valid_examples_num_dict,
             self.train_num, self.valid_num, self.test_num
         )
-
+        
         return federated_data
 
 

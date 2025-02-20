@@ -24,6 +24,7 @@ from ..utils import Logger
 type2byte = {
     torch.int8: 1,
     torch.int16: 2,
+    torch.bfloat16: 2,
     torch.int32: 4,
     torch.int64: 8,
     torch.float16: 2,

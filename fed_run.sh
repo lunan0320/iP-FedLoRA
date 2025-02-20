@@ -6,7 +6,7 @@ do
   let "idx=${idx}+1"
 done
 
-# eg.  bash fed_run.sh . sst-2 fedavg 10001 0 1 2 3
+# eg.  bash fed_run.sh . sst-2 fedavg 10001 0 1 2 3 4 5
 run_dirs=${args[0]}
 task_name=${args[1]}
 fl_algorithm=${args[2]}
@@ -52,7 +52,7 @@ CUDA_VISIBLE_DEVICES=${device[0]} python main.py \
 --port ${port} \
 --test_rounds True &
 
-#sleep 2s
+sleep 2s
 
 for(( i=1;i<${world_size};i++))
 do
@@ -70,7 +70,7 @@ do
     --world_size ${world_size} \
     --port ${port} \
     --test_rounds True &
-#    sleep 2s
+    sleep 2s
 }
 done
 

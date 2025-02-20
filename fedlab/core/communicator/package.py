@@ -25,7 +25,7 @@ from . import HEADER_SIZE
 from ...utils.message_code import MessageCode
 
 supported_torch_dtypes = [
-    torch.int8, torch.int16, torch.int32, torch.int64, torch.float16,
+    torch.int8, torch.int16, torch.int32, torch.int64, torch.float16, torch.bfloat16,
     torch.float32, torch.float64
 ]
 

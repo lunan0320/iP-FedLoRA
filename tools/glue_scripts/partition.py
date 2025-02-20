@@ -1,11 +1,7 @@
-import os
 import numpy as np
-from loguru import logger
-import sys
-from fedlab.utils.dataset import DataPartitioner
-import fedlab.utils.dataset.functional as F
-from tools.partitions import label_skew_process, dirichlet_quantity_process
 
+from fedlab.utils.dataset import DataPartitioner
+from tools.partitions import dirichlet_quantity_process,dirichlet_label_process
 
 class GlueDataPartition(DataPartitioner):
     def __init__(self, targets, num_clients, num_classes,
@@ -25,7 +21,6 @@ class GlueDataPartition(DataPartitioner):
         self.unbalance_sgm = unbalance_sgm
         self.verbose = verbose
         self.num_classes = num_classes
-        # self.rng = np.random.default_rng(seed)  # rng currently not supports randint
         np.random.seed(seed)
 
         # partition scheme check
@@ -40,20 +35,19 @@ class GlueDataPartition(DataPartitioner):
 
         # perform partition according to setting
         self.client_dict = self._perform_partition()
-        # get sample number count for each client
-        # self.client_sample_count = F.samples_num_count(self.client_dict, self.num_clients)
 
     def _perform_partition(self):
-        # client_dict = label_skew_process(
-        #     label_vocab=self.label_vocab, label_assignment=self.targets,
-        #     client_num=self.num_clients, alpha=self.dir_alpha,
-        #     data_length=len(self.targets)
-        # )
-        client_dict = dirichlet_quantity_process(
+        # dirichlet_label_process , label_skew_process
+        client_dict = dirichlet_label_process(
             label_vocab=self.label_vocab, label_assignment=self.targets,
             client_num=self.num_clients, alpha=self.dir_alpha,
             data_length=len(self.targets)
         )
+        # client_dict = dirichlet_quantity_process(
+        #     label_vocab=self.label_vocab, label_assignment=self.targets,
+        #     client_num=self.num_clients, alpha=self.dir_alpha,
+        #     data_length=len(self.targets)
+        # )
         return client_dict
 
     def __getitem__(self, index):

@@ -4,7 +4,7 @@ data_config:
 
 federated_config:
   alpha: 5
-  clients_num: 9
+  clients_num: 10
   rounds: 30
   sample: 0.5
   test_rounds: False
@@ -13,16 +13,20 @@ federated_config:
 
 model_config:
   model_type: roberta
-  model_output_mode: seq_classification
   model_name_or_path: "./pretrain/nlp/roberta-base/"
-  permutation_layers: False
-  tuning_type: lora_roberta-base
-  finetune_list: [0,32,8,1]
+
+  # model_type: deberta
+  # model_name_or_path: "./pretrain/nlp/debertav3"
+
+  # model_type: llama3
+  # model_name_or_path: "./pretrain/nlp/llama3-3b"
+
+  finetune_list: [0,64,32,16,8,1]
   
 training_config:
   train_method: knowledge 
   reg: True
-  mini_rounds: 1                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               
+  mini_rounds: 1                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              
   metric_name: glue
   seed: 42
 
@@ -30,7 +34,7 @@ dp_config:
   dp_method: AdaDP
   epsilon: 8
   delta: 1e-5
-  mode: rdp # mode: prv, moments, rdp
+  mode: rdp 
   max_clip: 0.2 
   lam: 3.2
   gamma: 0.1

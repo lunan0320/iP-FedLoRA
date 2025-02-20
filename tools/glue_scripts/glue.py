@@ -1,5 +1,4 @@
 import os
-import sys
 import pickle
 import argparse
 from loguru import logger
@@ -8,10 +7,6 @@ from transformers import glue_output_modes as output_modes
 from collections import Counter
 from partition import GlueDataPartition
 from glue_utils import glue_processors as processors
-from local import build_vaild
-import numpy as np
-import torch
-import random
 
 
 def Parser_args():
@@ -138,9 +133,9 @@ def convert_glue_to_device_pkl(args):
             partition_data[f"clients={args.clients_num}_alpha={args.alpha}"] = clients_partition_data
             
             for i in range(args.clients_num): 
-                train_examples_labels = [data['train'][idx].label for idx in partition_data['clients=9_alpha=1']['train'][i]]
-                valid_examples_labels = [data['valid'][idx].label for idx in partition_data['clients=9_alpha=1']['valid'][i]]
-                test_examples_labels = [data['test'][idx].label for idx in partition_data['clients=9_alpha=1']['test'][i]]
+                train_examples_labels = [data['train'][idx].label for idx in partition_data['clients=10_alpha=5']['train'][i]]
+                valid_examples_labels = [data['valid'][idx].label for idx in partition_data['clients=10_alpha=5']['valid'][i]]
+                test_examples_labels = [data['test'][idx].label for idx in partition_data['clients=10_alpha=5']['test'][i]]
                 print(f'Client {i} "Train: {Counter(train_examples_labels)} Valid: {Counter(valid_examples_labels)} Test: {Counter(test_examples_labels)}')
             
             with open(args.output_partition_file, "wb") as file:
@@ -152,29 +147,23 @@ if __name__ == "__main__":
     data_dir = args.data_dir
     output_dir = args.output_dir
  
-    # tasks = ["MRPC", "SST-2", "QNLI", "QQP", "MNLI", "RTE"]
-    # task_split_ratio = {
-    #     "SST-2": 0.2,
-    #     "MRPC":0.2,
-    #     "QNLI":0.2,
-    #     "QQP":0.2,
-    #     "MNLI":0.2,
-    #     "RTE":0.2
-    # }
-    tasks = ["SST-2"]
+    tasks = ["MRPC", "SST-2", "QNLI", "QQP", "MNLI"]
     task_split_ratio = {
-        "SST-2":0.2,
+        "SST-2": 0.2,
+        "MRPC":0.2,
+        "QNLI":0.2,
+        "QQP":0.2,
+        "MNLI":0.2
     }
  
-    client_nums = [9]
-    alphas = [1]
+    client_nums = [10]
+    alphas = [5]
 
     for task in tasks:
         args.task_split_ratio = task_split_ratio[task]
 
         for client_num in client_nums:
             for alpha in alphas:
-
                 args.alpha = alpha
                 args.clients_num = client_num
                 args.task = task

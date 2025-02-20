@@ -1,24 +1,18 @@
 """ BaseServer for iP-FedLoRA """
 
-import os
 import random
 import threading
 from abc import ABC
-from utils import setup_seed
 from torch.optim import lr_scheduler
 import torch
-import numpy as np
-from torch import nn
 from torch.nn import functional as F
 from utils.register import registry
 
-from fedlab.core.server.handler import Aggregators
 from fedlab.core.server.handler import ParameterServerBackendHandler
 from fedlab.core.server.manager import ServerManager
-from fedlab.utils.serialization import SerializationTool
 from fedlab.utils import MessageCode
 from fedlab.core.coordinator import Coordinator
-from transformers import get_linear_schedule_with_warmup, AdamW
+from transformers import AdamW
 import time
 
 class BaseSyncServerHandler(ParameterServerBackendHandler, ABC):  
@@ -106,7 +100,8 @@ class BaseSyncServerHandler(ParameterServerBackendHandler, ABC):
         if len(self.client_buffer_cache) == self.cluster_num:
 
             self.Alogits,weights = self.calculate_pearson_correlation(self.client_buffer_cache)
-            zero_tensor = torch.zeros(self.Alogits[0][0].shape, dtype=torch.float32)
+
+            zero_tensor = torch.zeros(self.Alogits[0][0].shape, dtype=self.Alogits[0][0].dtype)
             for i, step in enumerate(self.Alogits):
                 probabilities = F.softmax(step, dim=1)
                 confidence, _ = probabilities.max(dim=1)
