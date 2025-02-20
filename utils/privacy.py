@@ -7,7 +7,6 @@ def compute_noise_multiplier(target_epsilon, target_delta, global_epoch, local_e
     total_dataset_size = sum(client_data_sizes)
     sample_rate = batch_size / total_dataset_size 
     total_steps = (sum([global_epoch * local_epoch * (client_data_size / batch_size) for client_data_size in client_data_sizes]))
-    #total_steps = (sum([global_epoch * local_epoch * 50 for client_data_size in client_data_sizes]))
 
     noise_multiplier = get_noise_multiplier(
         target_epsilon=target_epsilon,
