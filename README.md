@@ -48,7 +48,7 @@ pip install -r requirements
 
 #### 2. Data preparation
 
-Download the dataset`mrpc`, `sst2`,`qnli`,`qqp`,`mnli` from glue benckmarks to`data` folder.
+Download the dataset `mrpc`, `sst2`,`qnli`,`qqp`,`mnli` from glue benckmarks to`data` folder.
 
 Download models and place under the folder `pretrain/nlp`.
 
