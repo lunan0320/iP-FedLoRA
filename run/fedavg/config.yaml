@@ -15,7 +15,7 @@ model_config:
   model_type: roberta
   model_name_or_path: "./pretrain/nlp/roberta-base/"
 
-  # model_type: deberta
+  # model_type: debertav3
   # model_name_or_path: "./pretrain/nlp/debertav3"
 
   # model_type: llama3
