@@ -48,7 +48,7 @@ pip install -r requirements
 
 #### 2. Data preparation
 
-Download the dataset `mrpc`, `sst2`,`qnli`,`qqp`,`mnli` from glue benckmarks to`data` folder.
+Download the dataset `mrpc` , `sst2` , `qnli` , `qqp` , `mnli` from glue benckmarks to `data` folder.
 
 Download models and place under the folder `pretrain/nlp`.
 
@@ -85,4 +85,6 @@ bash fed_run.sh . sst-2 fedavg 10001 0 1 2 3 4 5
 You can find hyper-parameters in `run/fedavg/config.yaml`, and more details are in the `configs` folder, including:
 
 - data_config, federated_config, model_config, training_config, dp_config
+
+
 
