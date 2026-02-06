@@ -1,4 +1,4 @@
-## Towards Improved Differentially Private Federated Fine-tuning of Language Models on Heterogeneous Clients
+## Efficient and Differentially Private Federated LLM Fine-Tuning on Heterogeneous Clients
 
 
 
