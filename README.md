@@ -1,4 +1,6 @@
 # Efficient and Differentially Private Federated LLM Fine-Tuning on Heterogeneous Clients
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.20433736.svg)](https://doi.org/10.5281/zenodo.20433736)
+
 > Nan Yan, Yuqing Li, Xiong Wang, Jing Chen, Wei Wang, Kun He, Ruiying Du, and Shuhua Li.  *in Proc. SIGKDD 2026*
 
 <!-- Code for the KDD '26 paper **Efficient and Differentially Private Federated LLM Fine-Tuning on Heterogeneous Clients**. -->
