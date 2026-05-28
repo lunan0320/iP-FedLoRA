@@ -1,12 +1,13 @@
-# iP-FedLoRA
+# Efficient and Differentially Private Federated LLM Fine-Tuning on Heterogeneous Clients
+> Nan Yan, Yuqing Li, Xiong Wang, Jing Chen, Wei Wang, Kun He, Ruiying Du, and Shuhua Li.  *in Proc. SIGKDD 2026*
 
-Code for the KDD '26 paper **Efficient and Differentially Private Federated LLM Fine-Tuning on Heterogeneous Clients**.
+<!-- Code for the KDD '26 paper **Efficient and Differentially Private Federated LLM Fine-Tuning on Heterogeneous Clients**. -->
 
 iP-FedLoRA is a privacy-preserving federated fine-tuning framework for heterogeneous clients. It combines matrix-wise differentially private LoRA fine-tuning, rank-compensated LoRA regularization, and noise-resilient knowledge distillation to improve the privacy-utility trade-off under both data and model heterogeneity.
 
 ## System Architecture
 
-
+![System architecture of iP-FedLoRA](imgs/overview.png)
 
 ## Folder Structure
 
@@ -99,15 +100,9 @@ Main hyper-parameters are defined in `run/fedavg/config.yaml`. The dataclass arg
 
 ## Experiment Results
 
-The following table is excerpted from Table 4 of the KDD '26 paper. MRPC reports F1 score; all other tasks report accuracy. Parenthesized values in the iP-FedLoRA row are the gains reported in the paper.
+The following table is excerpted from Table 4 of the paper. MRPC reports F1 score; all other tasks report accuracy. Parenthesized values in the iP-FedLoRA row are the gains reported in the paper.
 
-| Method | RoBERTa MRPC | RoBERTa SST-2 | RoBERTa QNLI | DeBERTa MRPC | DeBERTa SST-2 | DeBERTa QNLI | Llama QQP | Llama MNLI |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| DP-LoRA+FedPETuning | 85.9 +/- 1.02 | 92.0 +/- 0.42 | 84.2 +/- 1.22 | 85.5 +/- 1.52 | 92.5 +/- 0.27 | 86.5 +/- 0.58 | 85.1 +/- 0.18 | 85.1 +/- 0.45 |
-| DP-LoRA+FAH-QLoRA | 85.7 +/- 0.40 | 92.2 +/- 0.12 | 85.2 +/- 1.72 | 85.9 +/- 0.85 | 92.9 +/- 0.95 | 86.8 +/- 0.56 | 86.3 +/- 0.24 | 86.1 +/- 0.27 |
-| DP-LoRA+FLoRA | 86.2 +/- 0.82 | 92.3 +/- 1.01 | 85.9 +/- 0.21 | 86.5 +/- 0.97 | 93.0 +/- 0.58 | 87.3 +/- 1.24 | 87.3 +/- 0.22 | 87.2 +/- 0.83 |
-| FFA-LoRA | 85.3 +/- 1.00 | 92.3 +/- 1.37 | 85.2 +/- 0.32 | 85.8 +/- 1.24 | 92.7 +/- 0.15 | 87.0 +/- 0.43 | 86.4 +/- 0.66 | 85.8 +/- 0.40 |
-| iP-FedLoRA | 87.1 (+1.8) | 93.3 (+1.3) | 87.5 (+3.3) | 87.0 (+1.5) | 93.5 (+1.0) | 89.0 (+2.5) | 88.9 (+3.8) | 87.8 (+2.7) |
+![Experiment results of iP-FedLoRA](imgs/results.png)
 
 Under the paper setting, iP-FedLoRA improves model performance by up to 3.8% while reducing training time by 1.37x to 2.23x compared with the reported baselines.
 
