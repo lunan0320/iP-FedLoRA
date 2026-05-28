@@ -108,7 +108,7 @@ Under the paper setting, iP-FedLoRA improves model performance by up to 3.8% whi
 
 ## License
 
-This project is released under the Apache License 2.0. See `LICENSE` for details.
+This project is released under the Creative Commons Attribution 4.0 International (CC-BY-4.0) license. See `LICENSE` for details.
 
 
 
