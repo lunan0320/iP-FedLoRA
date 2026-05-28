@@ -12,77 +12,21 @@ iP-FedLoRA is a privacy-preserving federated fine-tuning framework for heterogen
 
 ```text
 iP-FedLoRA/
-|-- README.md                         # Project overview, setup guide, and main paper results.
-|-- main.py                           # Entry point that builds configuration and launches the selected FL trainer.
-|-- fed_run.sh                        # Multi-process launch script for the server and client workers.
-|-- requirements.txt                  # Python package list used by the project.
+|-- main.py                     # Entry point for building configs and launching training.
+|-- fed_run.sh                  # Multi-process launch script for one server and multiple clients.
+|-- run/fedavg/config.yaml      # Main experiment configuration for FL, model, training, and DP.
 |
-|-- configs/                          # Dataclass-based command-line and YAML configuration definitions.
-|   |-- __init__.py                   # Exports configuration argument classes.
-|   |-- datasets.py                   # Dataset paths, task names, sequence length, and cache arguments.
-|   |-- dp.py                         # Differential privacy arguments such as epsilon, delta, and DP method.
-|   |-- federated.py                  # Federated learning arguments such as clients, rounds, sampling, and rank.
-|   |-- models.py                     # Backbone model and LoRA-related model arguments.
-|   |-- trainers.py                   # TrainingArguments extension for optimizer, metrics, and runtime settings.
-|   |-- tuning.py                     # Task-specific LoRA fine-tuning hyper-parameters.
+|-- configs/                    # Argument definitions and task-specific hyper-parameters.
+|-- models/                     # Backbone loading and LoRA injection logic.
+|-- data/                       # Federated GLUE dataloaders and feature conversion.
+|-- trainers/                   # Client/server training loops, matrix-wise DP, and KD aggregation.
+|-- tools/                      # GLUE preprocessing, non-IID partitioning, and privacy accounting utilities.
+|-- utils/                      # Shared config, registry, logging, metrics, and privacy helpers.
+|-- fedlab/                     # Bundled FedLab communication/runtime components.
 |
-|-- data/                             # Dataset loading and feature conversion pipeline.
-|   |-- base_dataloader.py            # Base federated/centralized dataloader logic and cache handling.
-|   |-- dataloader.py                 # GLUE and NER dataloader implementations registered by task type.
-|   |-- utils.py                      # Dataset feature conversion helpers.
-|
-|-- models/                           # Backbone and LoRA model definitions.
-|   |-- __init__.py                   # Registers model classes.
-|   |-- base_models.py                # Builds HuggingFace backbones and injects LoRA modules.
-|   |-- classification.py             # Sequence classification wrapper used for GLUE tasks.
-|
-|-- run/fedavg/                       # FedAvg-style distributed runtime used by iP-FedLoRA.
-|   |-- __init__.py                   # Package marker for the FedAvg runtime.
-|   |-- client.py                     # FedAvg client trainer and manager wrappers.
-|   |-- config.yaml                   # Default experiment configuration for data, model, FL, training, and DP.
-|   |-- server.py                     # FedAvg server handler and manager wrappers.
-|   |-- trainer.py                    # Registers the FedAvg trainer and builds server/client components.
-|
-|-- trainers/                         # Federated training loop implementations.
-|   |-- __init__.py                   # Imports trainer modules for registry discovery.
-|   |-- FedBaseTrainer.py             # Base trainer that builds data, network, model, server, and client roles.
-|   |-- BaseClient/
-|   |   |-- __init__.py               # Exports the base client classes.
-|   |   |-- base_client.py            # Local training, matrix-wise DP, FedAvg aggregation, and KD update logic.
-|   |-- BaseServer/
-|       |-- __init__.py               # Exports the base server classes.
-|       |-- base_server.py            # Client sampling, logit aggregation, confidence filtering, and communication.
-|
-|-- tools/                            # Data partitioning and privacy-accounting utilities.
-|   |-- partitions.py                 # Dirichlet-based non-IID partition helpers.
-|   |-- glue_scripts/
-|   |   |-- glue.py                   # Converts GLUE datasets into cached raw and partition pickle files.
-|   |   |-- glue_metric.py            # GLUE metric helpers.
-|   |   |-- glue_utils.py             # GLUE processors and label definitions.
-|   |   |-- local.py                  # Local GLUE preprocessing helper.
-|   |   |-- partition.py              # GLUE partitioner wrapper.
-|   |   |-- partition.sh              # Shell wrapper for GLUE partition generation.
-|   |-- privacy_tools/
-|       |-- rdp_accountant.py         # Renyi differential privacy accounting utilities.
-|
-|-- utils/                            # Shared infrastructure and registries.
-|   |-- __init__.py                   # Re-exports common utilities.
-|   |-- config.py                     # Merges command-line arguments with run/fedavg/config.yaml.
-|   |-- evaluations.py                # Evaluation loop helpers.
-|   |-- general.py                    # File, seed, device, metric, and serialization utilities.
-|   |-- logger.py                     # Logging setup.
-|   |-- loss.py                       # Loss registry and cross-entropy loss implementation.
-|   |-- metrics.py                    # Task metrics and evaluation scoring.
-|   |-- privacy.py                    # Noise multiplier and simple privacy helper functions.
-|   |-- register.py                   # Global registry for models, data, metrics, losses, and trainers.
-|
-|-- fedlab/                           # Bundled FedLab communication/runtime components used by this codebase.
-|   |-- core/                         # Network, coordinator, client, server, and communicator primitives.
-|   |-- utils/                        # FedLab aggregation, serialization, message code, and dataset helpers.
-|
-|-- data/fedglue/                     # Expected generated GLUE pickle files, not committed by default.
-|-- pretrain/nlp/                     # Expected local HuggingFace model checkpoints, not committed by default.
-|-- output/                           # Expected training logs, caches, and checkpoints, not committed by default.
+|-- data/fedglue/               # Generated GLUE pickle files, not committed by default.
+|-- pretrain/nlp/               # Local pretrained model checkpoints, not committed by default.
+|-- output/                     # Training logs, caches, and checkpoints.
 ```
 
 ## Setup
