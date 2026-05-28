@@ -29,7 +29,7 @@ def noniid_slicing(dataset, num_clients, num_shards):
         The size of a shard equals to ``int(len(dataset)/num_shards)``.
         Each client will get ``int(num_shards/num_clients)`` shards.
 
-    Returns：
+    Returns:
         dict: ``{ 0: indices of dataset, 1: indices of dataset, ..., k: indices of dataset }``
     """
     total_sample_nums = len(dataset)
@@ -72,11 +72,11 @@ def noniid_slicing(dataset, num_clients, num_shards):
 def random_slicing(dataset, num_clients):
     """Slice a dataset randomly and equally for IID.
 
-    Args：
+    Args:
         dataset (torch.utils.data.Dataset): a dataset for slicing.
         num_clients (int):  the number of client.
 
-    Returns：
+    Returns:
         dict: ``{ 0: indices of dataset, 1: indices of dataset, ..., k: indices of dataset }``
     """
     num_items = int(len(dataset) / num_clients)

@@ -24,7 +24,7 @@ class Coordinator(object):
 
     Args:
         setup_dict (dict): A dict like {rank:client_num ...}, representing the map relation between process rank and client id.
-        mode (str, optional): “GLOBAL” and "LOCAL". Coordinator will map client id to (rank, global id) or (rank, local id) according to mode. For example, client id 51 is in a machine which has 1 manager and serial trainer simulating 10 clients. LOCAL id means the index of its 10 clients. Therefore, global id 51 will be mapped into local id 1 (depending on setting).
+        mode (str, optional): "GLOBAL" and "LOCAL". Coordinator will map client id to (rank, global id) or (rank, local id) according to mode. For example, client id 51 is in a machine which has 1 manager and serial trainer simulating 10 clients. LOCAL id means the index of its 10 clients. Therefore, global id 51 will be mapped into local id 1 (depending on setting).
     """
     def __init__(self, setup_dict, mode='LOCAL') -> None:
         self.map = setup_dict
