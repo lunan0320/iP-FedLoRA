@@ -1,0 +1,35 @@
+data_config:
+  dataset_name: glue
+federated_config:
+  alpha: 5
+  clients_num: 10
+  rounds: 1
+  sample: 0.5
+  test_rounds: true
+  log_test_len: 1
+model_config:
+  model_type: debertav3
+  use_fast_tokenizer: false
+  finetune_list: [0, 64, 32, 16, 8, 8]
+training_config:
+  train_method: knowledge
+  reg: true
+  mini_rounds: 1
+  metric_name: glue
+  seed: 42
+  public_warmstart_epochs: 30
+  public_warmstart_class_balanced: true
+  public_warmstart_learning_rate: 0.0005
+dp_config:
+  dp_method: AdaDP
+  private_head_mode: local_unnoised
+  noise_geometry: matrix_l2_normalized
+  clip_geometry: coordinate
+  max_total_lora_delta_norm: 0.25
+  max_total_head_delta_norm: 0.25
+  epsilon: 8
+  delta: 1e-5
+  mode: rdp
+  max_clip: 0.2
+  lam: 3.2
+  gamma: 0.1
