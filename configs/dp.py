@@ -35,7 +35,7 @@ class DPArguments:
             "help": (
                 "coordinate preserves the released per-coordinate Gaussian "
                 "scale; matrix_l2_normalized divides each matrix coordinate "
-                "scale by sqrt(numel) for empirical reproduction."
+                "scale by sqrt(numel)."
             )
         },
     )
@@ -53,7 +53,7 @@ class DPArguments:
         metadata={
             "help": (
                 "Optional post-noise global L2 cap for the complete LoRA "
-                "release in empirical reproduction mode."
+                "release."
             )
         },
     )
